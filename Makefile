@@ -132,6 +132,12 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
+	$U/_echo_echo\
+	$U/_prime\
+	$U/_pwd\
+	$U/_getfd\
+	$U/_test_setenv\
+	$U/_test_getenv\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

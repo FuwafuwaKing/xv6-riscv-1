@@ -681,3 +681,50 @@ procdump(void)
     printf("\n");
   }
 }
+
+#define MAX_ENV_VARS 32
+
+struct env_var {
+  char name[32];
+  char value[128];
+};
+
+static struct env_var env_vars[MAX_ENV_VARS];
+static int env_var_count = 0;
+struct spinlock env_lock;
+
+void envinit(void) {
+  initlock(&env_lock, "env");
+}
+
+int setenv(const char *name, const char *value) {
+  acquire(&env_lock);
+  for (int i = 0; i < env_var_count; i++) {
+    if (strncmp(env_vars[i].name, name, sizeof(env_vars[i].name)) == 0) {
+      strncpy(env_vars[i].value, value, sizeof(env_vars[i].value));
+      release(&env_lock);
+      return 0;
+    }
+  }
+  if (env_var_count < MAX_ENV_VARS) {
+    strncpy(env_vars[env_var_count].name, name, sizeof(env_vars[env_var_count].name));
+    strncpy(env_vars[env_var_count].value, value, sizeof(env_vars[env_var_count].value));
+    env_var_count++;
+    release(&env_lock);
+    return 0;
+  }
+  release(&env_lock);
+  return -1;
+}
+
+char* getenv(const char *name) {
+  acquire(&env_lock);
+  for (int i = 0; i < env_var_count; i++) {
+    if (strncmp(env_vars[i].name, name, sizeof(env_vars[i].name)) == 0) {
+      release(&env_lock);
+      return env_vars[i].value;
+    }
+  }
+  release(&env_lock);
+  return 0;
+}

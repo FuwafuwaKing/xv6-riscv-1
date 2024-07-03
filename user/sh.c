@@ -76,6 +76,29 @@ runcmd(struct cmd *cmd)
     ecmd = (struct execcmd*)cmd;
     if(ecmd->argv[0] == 0)
       exit(1);
+
+    // 新しいコード開始
+    char path[100];
+    char *prefix = "/"; // ルートディレクトリ
+    int i = 0, j = 0;
+
+    // ルートディレクトリのパスをコピー
+    while(prefix[i] != '\0') {
+      path[i] = prefix[i];
+      i++;
+    }
+
+    // コマンド名をコピー
+    while(ecmd->argv[0][j] != '\0') {
+      path[i] = ecmd->argv[0][j];
+      i++;
+      j++;
+    }
+    path[i] = '\0'; // 終端文字を追加
+
+    exec(path, ecmd->argv);
+    // 新しいコード終了
+
     exec(ecmd->argv[0], ecmd->argv);
     fprintf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
@@ -160,7 +183,7 @@ main(void)
   while(getcmd(buf, sizeof(buf)) >= 0){
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
       // Chdir must be called by the parent, not the child.
-      buf[strlen(buf)-1] = 0;  // chop \n
+      buf[strlen(buf)-1] = 0; // chop \n
       if(chdir(buf+3) < 0)
         fprintf(2, "cannot cd %s\n", buf+3);
       continue;
