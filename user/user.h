@@ -24,7 +24,7 @@ int sleep(int);
 int uptime(void);
 int getfdmap(void);
 int setenv(const char *name, const char *value);
-char* getenv(const char *name);
+int getenv(const char *name, char *buf, int bufsize);  // bufsizeを指定することでカーネル側でバッファサイズを確認し、適切にデータがコピーできる
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -42,5 +42,7 @@ void free(void*);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
+
+
 
 

@@ -26,6 +26,54 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+#define MAX_ENV_VARS 64  // 環境変数の最大数
+#define MAX_ENV_NAME 32  // 環境変数名の最大長さ
+#define MAX_ENV_VALUE 128 // 環境変数値の最大長さ
+
+struct spinlock env_lock;
+
+void envinit(void) {
+  initlock(&env_lock, "env");
+}
+
+struct spinlock env_lock;
+struct env_var env_vars[MAX_ENV_VARS];
+int env_var_count = 0;
+
+
+int setenv(const char *name, const char *value) {
+  acquire(&env_lock);
+  for (int i = 0; i < env_var_count; i++) {
+    if (strncmp(env_vars[i].name, name, sizeof(env_vars[i].name)) == 0) {
+      strncpy(env_vars[i].value, value, sizeof(env_vars[i].value));
+      release(&env_lock);
+      return 0;
+    }
+  }
+  if (env_var_count < MAX_ENV_VARS) {
+    strncpy(env_vars[env_var_count].name, name, sizeof(env_vars[env_var_count].name));
+    strncpy(env_vars[env_var_count].value, value, sizeof(env_vars[env_var_count].value));
+    env_var_count++;
+    release(&env_lock);
+    return 0;
+  }
+  release(&env_lock);
+  return -1;
+}
+
+char* getenv(const char *name) {
+  acquire(&env_lock);
+  for (int i = 0; i < env_var_count; i++) {
+    if (strncmp(env_vars[i].name, name, sizeof(env_vars[i].name)) == 0) {
+      release(&env_lock);
+      return env_vars[i].value;
+    }
+  }
+  release(&env_lock);
+  return 0;
+}
+
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -291,24 +339,30 @@ fork(void)
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
-    release(&np->lock);
     return -1;
   }
   np->sz = p->sz;
 
-  // copy saved user registers.
+  // Copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
-  // increment reference counts on open file descriptors.
+  // Copy parent process's open files.
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+
+  // Copy parent process's environment variables.
+  np->env_var_count = p->env_var_count;
+  for(i = 0; i < p->env_var_count; i++) {
+    safestrcpy(np->env_vars[i].name, p->env_vars[i].name, MAX_ENV_NAME);
+    safestrcpy(np->env_vars[i].value, p->env_vars[i].value, MAX_ENV_VALUE);
+  }
 
   pid = np->pid;
 
@@ -318,9 +372,9 @@ fork(void)
   np->parent = p;
   release(&wait_lock);
 
-  acquire(&np->lock);
+  acquire(&p->lock);
   np->state = RUNNABLE;
-  release(&np->lock);
+  release(&p->lock);
 
   return pid;
 }
@@ -682,49 +736,27 @@ procdump(void)
   }
 }
 
-#define MAX_ENV_VARS 32
-
-struct env_var {
-  char name[32];
-  char value[128];
-};
-
-static struct env_var env_vars[MAX_ENV_VARS];
-static int env_var_count = 0;
-struct spinlock env_lock;
-
-void envinit(void) {
-  initlock(&env_lock, "env");
-}
-
-int setenv(const char *name, const char *value) {
+int unsetenv(const char *name) {
   acquire(&env_lock);
-  for (int i = 0; i < env_var_count; i++) {
-    if (strncmp(env_vars[i].name, name, sizeof(env_vars[i].name)) == 0) {
-      strncpy(env_vars[i].value, value, sizeof(env_vars[i].value));
+  for (int i = 0; i < myproc()->env_var_count; i++) {
+    if (strncmp(myproc()->env_vars[i].name, name, sizeof(myproc()->env_vars[i].name)) == 0) {
+      // 環境変数を削除（後ろの要素を前に詰める）
+      for (int j = i; j < myproc()->env_var_count - 1; j++) {
+        strncpy(myproc()->env_vars[j].name, myproc()->env_vars[j+1].name, sizeof(myproc()->env_vars[j].name));
+        strncpy(myproc()->env_vars[j].value, myproc()->env_vars[j+1].value, sizeof(myproc()->env_vars[j].value));
+      }
+      myproc()->env_var_count--;
       release(&env_lock);
       return 0;
     }
   }
-  if (env_var_count < MAX_ENV_VARS) {
-    strncpy(env_vars[env_var_count].name, name, sizeof(env_vars[env_var_count].name));
-    strncpy(env_vars[env_var_count].value, value, sizeof(env_vars[env_var_count].value));
-    env_var_count++;
-    release(&env_lock);
-    return 0;
-  }
   release(&env_lock);
-  return -1;
+  return -1; // 指定された環境変数が見つからなかった
 }
 
-char* getenv(const char *name) {
-  acquire(&env_lock);
-  for (int i = 0; i < env_var_count; i++) {
-    if (strncmp(env_vars[i].name, name, sizeof(env_vars[i].name)) == 0) {
-      release(&env_lock);
-      return env_vars[i].value;
-    }
-  }
-  release(&env_lock);
-  return 0;
+uint64 sys_unsetenv(void) {
+  char name[MAX_ENV_NAME];
+  if (argstr(0, name, MAX_ENV_NAME) < 0)
+    return -1;
+  return unsetenv(name);
 }

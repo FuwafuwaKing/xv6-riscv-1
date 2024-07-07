@@ -44,7 +44,7 @@ ls(char *path)
   switch(st.type){
   case T_DEVICE:
   case T_FILE:
-    printf("%s %d %d %l\n", fmtname(path), st.type, st.ino, st.size);
+    printf("%s %d %d %d\n", fmtname(path), st.type, st.ino, st.size);
     break;
 
   case T_DIR:
@@ -80,7 +80,24 @@ main(int argc, char *argv[])
     ls(".");
     exit(0);
   }
-  for(i=1; i<argc; i++)
-    ls(argv[i]);
+
+  for(i=1; i<argc; i++) {
+    // 引数が$から始まったら
+    if (argv[i][0] == '$') {
+      // 環境変数名を取得
+      char *env_var_name = argv[i] + 1;  // '$' を除去
+      char env_var_value[128];
+      // 環境変数の値を取得
+      if (getenv(env_var_name, env_var_value, sizeof(env_var_value)) < 0) {
+        fprintf(2, "ls: cannot get environment variable %s\n", env_var_name);
+        exit(1);
+      }
+      ls(env_var_value);  // 環境変数の値をパスとして使用
+
+    // 引数が$から始まらなかったら
+    } else {
+      ls(argv[i]); //そのまま
+    }
+  }
   exit(0);
 }

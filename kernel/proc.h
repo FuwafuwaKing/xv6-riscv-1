@@ -1,3 +1,5 @@
+#include "defs.h"
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -81,6 +83,16 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+// 環境変数に関する定義
+#define MAX_ENV_VARS 64  // 環境変数の最大数
+#define MAX_ENV_NAME 32  // 環境変数の名前の最大長
+#define MAX_ENV_VALUE 128  // 環境変数の値の最大長
+
+struct env_var {
+  char name[MAX_ENV_NAME];
+  char value[MAX_ENV_VALUE];
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -104,4 +116,6 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct env_var env_vars[MAX_ENV_VARS]; // 環境変数を格納する配列
+  int env_var_count;                     // 環境変数の数
 };

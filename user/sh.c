@@ -1,8 +1,26 @@
 // Shell.
 
 #include "kernel/types.h"
+#include "kernel/stat.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
+#include "kernel/syscall.h"
+#include "kernel/fs.h"
+
+// 文字列操作関数のプロトタイプ宣言
+void strcpy_custom(char *dest, const char *src);
+void strcat_custom(char *dest, const char *src);
+
+// strcpyの代替関数
+void strcpy_custom(char *dest, const char *src) {
+  while ((*dest++ = *src++) != '\0');
+}
+
+// strcatの代替関数
+void strcat_custom(char *dest, const char *src) {
+  while (*dest) dest++;
+  while ((*dest++ = *src++) != '\0');
+}
 
 // Parsed command representation
 #define EXEC  1
@@ -55,58 +73,65 @@ struct cmd *parsecmd(char*);
 void runcmd(struct cmd*) __attribute__((noreturn));
 
 // Execute cmd.  Never returns.
-void
-runcmd(struct cmd *cmd)
-{
-  int p[2];
+void runcmd(struct cmd *cmd) {
   struct backcmd *bcmd;
   struct execcmd *ecmd;
   struct listcmd *lcmd;
   struct pipecmd *pcmd;
   struct redircmd *rcmd;
 
-  if(cmd == 0)
+  if (cmd == 0)
     exit(1);
 
-  switch(cmd->type){
+  switch (cmd->type) {
   default:
     panic("runcmd");
 
   case EXEC:
     ecmd = (struct execcmd*)cmd;
-    if(ecmd->argv[0] == 0)
+    if (ecmd->argv[0] == 0)
       exit(1);
 
-    // 新しいコード開始
-    char path[100];
-    char *prefix = "/"; // ルートディレクトリ
-    int i = 0, j = 0;
+    char path[512];
+    char *paths = malloc(512);
 
-    // ルートディレクトリのパスをコピー
-    while(prefix[i] != '\0') {
-      path[i] = prefix[i];
-      i++;
-    }
-
-    // コマンド名をコピー
-    while(ecmd->argv[0][j] != '\0') {
-      path[i] = ecmd->argv[0][j];
-      i++;
-      j++;
-    }
-    path[i] = '\0'; // 終端文字を追加
-
+    // カレントディレクトリを最初に探索
+    strcpy_custom(path, "./");
+    strcat_custom(path, ecmd->argv[0]);
     exec(path, ecmd->argv);
-    // 新しいコード終了
 
-    exec(ecmd->argv[0], ecmd->argv);
+    if (getenv("PATH", paths, 512) < 0) {
+      fprintf(2, "getenv PATH failed\n");
+      exit(1);
+    }
+
+    // PATH環境変数のディレクトリリストを探索(:で区切ってるやつを順番に探索する。xv6では全部ルート(/)にあるから意味ないけど)
+    char *path_ptr = paths;
+    char *p_end = paths + strlen(paths);
+    while (path_ptr < p_end) {
+      char *dir = path_ptr;
+      while (path_ptr < p_end && *path_ptr != ':')
+        path_ptr++;
+      *path_ptr = 0;
+      path_ptr++;
+
+      // ディレクトリとコマンド名を結合してパスを作成
+      strcpy_custom(path, dir);
+      strcat_custom(path, "/");
+      strcat_custom(path, ecmd->argv[0]);
+
+      exec(path, ecmd->argv);
+    }
+    free(paths);
+
+    // PATH内のどのディレクトリにもコマンドが見つからなかった場合
     fprintf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
 
   case REDIR:
     rcmd = (struct redircmd*)cmd;
     close(rcmd->fd);
-    if(open(rcmd->file, rcmd->mode) < 0){
+    if (open(rcmd->file, rcmd->mode) < 0) {
       fprintf(2, "open %s failed\n", rcmd->file);
       exit(1);
     }
@@ -115,7 +140,7 @@ runcmd(struct cmd *cmd)
 
   case LIST:
     lcmd = (struct listcmd*)cmd;
-    if(fork1() == 0)
+    if (fork() == 0)
       runcmd(lcmd->left);
     wait(0);
     runcmd(lcmd->right);
@@ -123,31 +148,32 @@ runcmd(struct cmd *cmd)
 
   case PIPE:
     pcmd = (struct pipecmd*)cmd;
-    if(pipe(p) < 0)
+    int pipe_fds[2];  // 変数名を変更して他と衝突しないようにする。pは
+    if (pipe(pipe_fds) < 0)
       panic("pipe");
-    if(fork1() == 0){
+    if (fork() == 0) {
       close(1);
-      dup(p[1]);
-      close(p[0]);
-      close(p[1]);
+      dup(pipe_fds[1]);
+      close(pipe_fds[0]);
+      close(pipe_fds[1]);
       runcmd(pcmd->left);
     }
-    if(fork1() == 0){
+    if (fork() == 0) {
       close(0);
-      dup(p[0]);
-      close(p[0]);
-      close(p[1]);
+      dup(pipe_fds[0]);
+      close(pipe_fds[0]);
+      close(pipe_fds[1]);
       runcmd(pcmd->right);
     }
-    close(p[0]);
-    close(p[1]);
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
     wait(0);
     wait(0);
     break;
 
   case BACK:
     bcmd = (struct backcmd*)cmd;
-    if(fork1() == 0)
+    if (fork() == 0)
       runcmd(bcmd->cmd);
     break;
   }

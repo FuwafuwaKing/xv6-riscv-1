@@ -5,6 +5,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "syscall.h"
 
 uint64
 sys_exit(void)
@@ -105,21 +106,45 @@ sys_getfdmap(void)
     return fd_mask;
 }
 
-uint64
-sys_setenv(void)
-{
-  char name[32];
-  char value[128];
-  if(argstr(0, name, sizeof(name)) < 0 || argstr(1, value, sizeof(value)) < 0)
+uint64 sys_setenv(void) {
+  char name[MAX_ENV_NAME];
+  char value[MAX_ENV_VALUE];
+
+  if (argstr(0, name, MAX_ENV_NAME) < 0)
     return -1;
+  if (argstr(1, value, MAX_ENV_VALUE) < 0)
+    return -1;
+
   return setenv(name, value);
 }
 
-uint64
-sys_getenv(void)
-{
-  char name[32];
-  if(argstr(0, name, sizeof(name)) < 0)
+uint64 sys_getenv(void) {
+  char name[MAX_ENV_NAME];
+  uint64 buf;
+  int bufsize;
+
+  // ユーザーから渡された環境変数名をカーネル内の name バッファにコピー
+  if (argstr(0, name, MAX_ENV_NAME) < 0)
     return -1;
-  return (uint64)getenv(name);
+
+  // ユーザーから渡されたバッファのアドレスを buf にコピー
+  argaddr(1, &buf);
+
+  // ユーザーから渡されたバッファのサイズを bufsize にコピー
+  argint(2, &bufsize);
+
+  // 追加のエラーチェック
+  if (buf == 0 || bufsize <= 0)
+    return -1;
+
+  // 指定された環境変数の値を取得
+  char *value = getenv(name);
+  if (value == 0)
+    return -1;
+
+  // 環境変数の値をユーザーバッファにコピー
+  if (copyout(myproc()->pagetable, buf, value, bufsize) < 0)
+    return -1;
+
+  return 0;
 }
